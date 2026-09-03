@@ -1,116 +1,86 @@
-# Pterodactyl + Blueprint CI Build
+# Pterodactyl + Blueprint CI/CD for Shared Hosting
 
-This repository moves the expensive frontend build from shared hosting to GitHub Actions.
+This repository builds Pterodactyl + Blueprint entirely on GitHub Actions and publishes a ready-to-deploy release. Shared hosting does not run Yarn, Webpack, Terser, Composer, or Blueprint's asset build.
 
-## What GitHub Actions does
+## What CI does
 
-1. Downloads the official Pterodactyl Panel release.
-2. Downloads the latest Blueprint release archive.
-3. Installs Yarn dependencies.
-4. Runs the production Webpack build on a GitHub runner.
-5. Removes `node_modules` and server-specific files.
-6. Creates `pterodactyl-blueprint-build.tar.gz`.
+1. Downloads the selected official Pterodactyl Panel release.
+2. Downloads the latest Blueprint release.
+3. Installs production PHP dependencies.
+4. Installs Node dependencies.
+5. Builds frontend assets on GitHub with OpenSSL legacy compatibility enabled.
+6. Packages `vendor`, Blueprint files, and production assets into `pterodactyl-blueprint-build.tar.gz`.
+7. Uploads the package as both a GitHub Actions artifact and the latest GitHub Release asset.
 
-The package is designed so your shared hosting does **not** need to run Webpack or Terser.
+## One-time shared-hosting setup
 
-## Important limitation
+Clone this repository anywhere outside the panel directory:
 
-Blueprint's complete installation state can depend on its installer, database migrations, symlinks and server capabilities. This CI pipeline intentionally does not fake the `is_installed` marker. The package contains the built Blueprint source/assets, while database/server finalization remains on the target server.
+```bash
+cd ~
+git clone https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git pterodactyl-blueprint-cicd
+cd pterodactyl-blueprint-cicd
+```
 
-This is safer than creating `is_installed` manually.
-
-## Build
-
-1. Push this repository to GitHub.
-2. Open **Actions**.
-3. Select **Build Pterodactyl + Blueprint**.
-4. Click **Run workflow**.
-5. Wait for the build to finish.
-6. Download the artifact named `pterodactyl-blueprint-build`.
-
-You can rename the downloaded file to:
+Your existing panel is currently at:
 
 ```text
-pterodactyl-blueprint-build.tar.gz
+/home/youruser/domains/pterodactyl.example.com
 ```
 
-## Deploy on your shared hosting
-
-Your target directory should already contain a working `.env`.
-
-Example:
+Deploy with:
 
 ```bash
-cd /home/rntteamx/domains/ptr2.rnt-team.me
+PANEL_DIR=/home/youruser/domains/pterodactyl.example.com \
+PHP_BIN=/opt/alt/php82/usr/bin/php \
+bash scripts/deploy.sh
 ```
 
-Copy these files into that directory:
+The deploy script automatically downloads:
 
-- `pterodactyl-blueprint-build.tar.gz`
-- `scripts/deploy.sh`
+```text
+https://github.com/OWNER/REPOSITORY/releases/latest/download/pterodactyl-blueprint-build.tar.gz
+```
 
-Then:
+It determines `OWNER/REPOSITORY` from the repository's `origin` remote, or you can explicitly set:
 
 ```bash
-chmod +x deploy.sh
-./deploy.sh
+GITHUB_REPOSITORY=owner/repo PANEL_DIR=/path/to/panel bash scripts/deploy.sh
 ```
 
-The script:
+## What deployment preserves
 
-- backs up `.env`
-- backs up `storage`
-- extracts into a staging directory
-- preserves `.env`
-- preserves persistent storage/uploads
-- switches application files
-- runs `php artisan migrate --force`
-- clears/rebuilds Laravel caches
+- `.env`
+- database (never touched directly)
+- `storage/`
+- `public/uploads/`
 
-It never runs Yarn, npm, Webpack or Terser.
+A complete rollback copy is created in:
 
-## Environment variables
-
-You can override the PHP binary:
-
-```bash
-PHP_BIN=/opt/alt/php82/usr/bin/php ./deploy.sh
+```text
+.deploy-backups/TIMESTAMP/
 ```
 
-For your hosting, this may be useful if the default CLI PHP is different.
+If migration or cache finalization fails, the script restores the previous application files automatically.
 
-## First installation
+## Blueprint on restricted shared hosting
 
-For a completely new panel:
+Your PHP CLI has `exec()` and `symlink()` disabled. Blueprint's normal installer can therefore complete most steps but abort before its final marker is written. Since CI already builds the assets and deployment has successfully completed migrations and Laravel cache finalization, this deployer creates Blueprint's `is_installed` marker only as the final deployment step when Blueprint's private database directory exists.
 
-1. Deploy the package.
-2. Create/configure `.env`.
-3. Generate/configure `APP_KEY`.
-4. Configure the database.
-5. Run migrations.
-6. Run Blueprint's official installer/finalization as supported by the server.
+The deployer never runs Webpack or Terser on shared hosting.
 
 ## Updating later
 
-Run the GitHub workflow again, download the new artifact, and run:
+After GitHub Actions publishes a new release:
 
 ```bash
-PHP_BIN=/opt/alt/php82/usr/bin/php ./deploy.sh
+cd ~/pterodactyl-blueprint-cicd
+git pull
+PANEL_DIR=/home/youruser/domains/pterodactyl.example.com \
+PHP_BIN=/opt/alt/php82/usr/bin/php \
+bash scripts/deploy.sh
 ```
 
-Always keep the automatically created `.deploy-backups` until you confirm the panel works.
+## Important
 
-## Security
-
-Never commit `.env`, database credentials, API keys, or panel secrets to this repository.
-
-
-## OpenSSL legacy compatibility
-
-The workflow explicitly sets:
-
-```text
-NODE_OPTIONS=--openssl-legacy-provider
-```
-
-during the production build because the current panel dependency tree still contains packages that use legacy OpenSSL hashing APIs. This affects the build runner only; it does not require changing your shared-hosting PHP configuration.
+Keep this repository separate from the Pterodactyl panel directory. Do not clone it into `/home/youruser/domains/pterodactyl.example.com`.

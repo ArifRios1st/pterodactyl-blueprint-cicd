@@ -11,7 +11,7 @@ on:
     - cron: "0 3 * * 1"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -19,9 +19,7 @@ jobs:
 
     steps:
       - name: Prepare tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip zip rsync
+        run: sudo apt-get update && sudo apt-get install -y unzip zip rsync
 
       - name: Setup PHP 8.2
         uses: shivammathur/setup-php@v2
@@ -48,55 +46,57 @@ jobs:
           else
             URL="https://github.com/pterodactyl/panel/releases/download/${PANEL_VERSION}/panel.tar.gz"
           fi
-          curl -L --fail --retry 3 "$URL" -o panel.tar.gz
+          curl -fL --retry 3 "$URL" -o panel.tar.gz
           tar -xzf panel.tar.gz -C panel
 
       - name: Download Blueprint
         working-directory: panel
         run: |
-          curl -L --fail --retry 3 \
-            "https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip" \
-            -o release.zip
+          curl -fL --retry 3 "https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip" -o release.zip
           unzip -oq release.zip
           rm -f release.zip
-
-      - name: Verify Blueprint installer
-        working-directory: panel
-        run: |
           test -f blueprint.sh
           chmod +x blueprint.sh
 
+      - name: Install PHP production dependencies
+        working-directory: panel
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
       - name: Install Node dependencies
         working-directory: panel
-        run: |
-          yarn install --frozen-lockfile || yarn install
+        run: yarn install --frozen-lockfile || yarn install
 
       - name: Build production assets
         working-directory: panel
         env:
           NODE_OPTIONS: --openssl-legacy-provider
-        run: |
-          yarn run build:production --progress
+        run: yarn run build:production --progress
 
       - name: Prepare deployable package
         working-directory: panel
         run: |
-          rm -rf node_modules
-          rm -rf .git
-          rm -rf .update
+          rm -rf node_modules .git .update
           rm -rf .blueprint/tmp/*
-          rm -rf storage/logs/*
-          rm -rf storage/framework/cache/*
-          rm -rf storage/framework/sessions/*
-          rm -rf storage/framework/views/*
+          rm -rf storage/logs/* storage/framework/cache/* storage/framework/sessions/* storage/framework/views/*
           rm -f .env
           find bootstrap/cache -type f ! -name '.gitignore' -delete || true
           find . -type f -name '*.map' -delete
           tar -czf ../pterodactyl-blueprint-build.tar.gz .
 
-      - name: Upload deploy package
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: pterodactyl-blueprint-build
           path: pterodactyl-blueprint-build.tar.gz
           retention-days: 14
+
+      - name: Publish rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" pterodactyl-blueprint-build.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Pterodactyl + Blueprint build $TAG" \
+            --notes "Automated deploy package built by GitHub Actions." \
+            --latest
