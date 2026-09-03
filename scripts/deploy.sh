@@ -48,9 +48,9 @@ trap cleanup EXIT
 
 ROLLBACK_REQUIRED=0
 rollback() {
-  if [ "$ROLLBACK_REQUIRED" = 1 ] && [ -d "$BACKUP/app" ]; then
+  if [ "$ROLLBACK_REQUIRED" = 1 ] && [ -f "$BACKUP/panel-backup.tar.gz" ]; then
     echo "ERROR: Deployment failed. Restoring file backup..."
-    rsync -a --delete "$BACKUP/app/" "$PANEL_DIR/" || true
+    tar -xzf "$BACKUP/panel-backup.tar.gz" -C "$PANEL_DIR" || true
     cp -f "$BACKUP/.env" "$PANEL_DIR/.env" || true
   fi
 }
@@ -63,16 +63,17 @@ tar -tzf "$PACKAGE" >/dev/null
 
 echo "[2/9] Creating rollback backup..."
 cp -a "$PANEL_DIR/.env" "$BACKUP/.env"
-mkdir -p "$BACKUP/app"
-# Back up everything that can be overwritten. Exclude the backup directory itself.
-rsync -a --delete \
-  --exclude='.deploy-backups/' \
-  --exclude='.deploy-stage.*' \
-  "$PANEL_DIR/" "$BACKUP/app/"
+# rsync is commonly unavailable on shared hosting. Use tar, which is already
+# required for extracting the CI package.
+tar -czf "$BACKUP/panel-backup.tar.gz" \
+  --exclude='./.deploy-backups' \
+  --exclude='./.deploy-stage.*' \
+  -C "$PANEL_DIR" .
 
 ROLLBACK_REQUIRED=1
 
 echo "[3/9] Extracting release..."
+mkdir -p "$STAGE/release"
 tar -xzf "$PACKAGE" -C "$STAGE/release"
 RELEASE_DIR="$STAGE/release"
 
@@ -94,13 +95,13 @@ rm -f "$RELEASE_DIR/.env"
 rm -rf "$RELEASE_DIR/storage" "$RELEASE_DIR/public/uploads"
 
 echo "[5/9] Overlaying release files..."
-rsync -a --delete \
-  --exclude='.env' \
-  --exclude='storage/' \
-  --exclude='public/uploads/' \
-  --exclude='.deploy-backups/' \
-  --exclude='.deploy-stage.*' \
-  "$RELEASE_DIR/" "$PANEL_DIR/"
+# Use tar instead of rsync for shared-hosting compatibility. This safely
+# overlays all release files while the persistent paths below remain excluded.
+tar -C "$RELEASE_DIR" \
+  --exclude='./.env' \
+  --exclude='./storage' \
+  --exclude='./public/uploads' \
+  -cf - . | tar -C "$PANEL_DIR" -xf -
 cp -a "$STAGE/.env" "$PANEL_DIR/.env"
 [ -d "$STAGE/storage" ] && { rm -rf "$PANEL_DIR/storage"; cp -a "$STAGE/storage" "$PANEL_DIR/storage"; }
 [ -d "$STAGE/public/uploads" ] && { mkdir -p "$PANEL_DIR/public"; rm -rf "$PANEL_DIR/public/uploads"; cp -a "$STAGE/public/uploads" "$PANEL_DIR/public/uploads"; }

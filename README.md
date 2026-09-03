@@ -25,13 +25,13 @@ cd pterodactyl-blueprint-cicd
 Your existing panel is currently at:
 
 ```text
-/home/youruser/domains/pterodactyl.example.com
+/path/to/pterodactyl-panel
 ```
 
 Deploy with:
 
 ```bash
-PANEL_DIR=/home/youruser/domains/pterodactyl.example.com \
+PANEL_DIR=/path/to/pterodactyl-panel \
 PHP_BIN=/opt/alt/php82/usr/bin/php \
 bash scripts/deploy.sh
 ```
@@ -76,11 +76,33 @@ After GitHub Actions publishes a new release:
 ```bash
 cd ~/pterodactyl-blueprint-cicd
 git pull
-PANEL_DIR=/home/youruser/domains/pterodactyl.example.com \
+PANEL_DIR=/path/to/pterodactyl-panel \
 PHP_BIN=/opt/alt/php82/usr/bin/php \
 bash scripts/deploy.sh
 ```
 
 ## Important
 
-Keep this repository separate from the Pterodactyl panel directory. Do not clone it into `/home/youruser/domains/pterodactyl.example.com`.
+Keep this repository separate from the Pterodactyl panel directory. Do not clone it into `/path/to/pterodactyl-panel`.
+
+
+## Shared Hosting Configuration
+
+The deployment script does not require your hosting username or domain to be stored in this repository. Pass your installation path at runtime:
+
+```bash
+PANEL_DIR=/path/to/pterodactyl-panel \
+PHP_BIN=/usr/local/bin/php \
+bash scripts/deploy.sh
+```
+
+Replace `/path/to/pterodactyl-panel` with the absolute path to your own Pterodactyl installation.
+
+Do not commit the following to GitHub:
+
+- hosting usernames
+- hosting domains
+- absolute paths containing personal account names
+- `.env` files
+- database credentials
+- API tokens or deployment secrets
