@@ -1,0 +1,100 @@
+name: Build Pterodactyl + Blueprint
+
+on:
+  workflow_dispatch:
+    inputs:
+      panel_version:
+        description: "Pterodactyl release tag, or 'latest'"
+        required: true
+        default: "latest"
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip rsync
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, bcmath, curl, zip, gd, mysql
+          tools: composer:v2
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Yarn 1
+        run: npm install -g yarn@1.22.22
+
+      - name: Download Pterodactyl Panel
+        env:
+          PANEL_VERSION: ${{ inputs.panel_version || 'latest' }}
+        run: |
+          mkdir panel
+          if [ "$PANEL_VERSION" = "latest" ]; then
+            URL="https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz"
+          else
+            URL="https://github.com/pterodactyl/panel/releases/download/${PANEL_VERSION}/panel.tar.gz"
+          fi
+          curl -L --fail --retry 3 "$URL" -o panel.tar.gz
+          tar -xzf panel.tar.gz -C panel
+
+      - name: Download Blueprint
+        working-directory: panel
+        run: |
+          curl -L --fail --retry 3 \
+            "https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip" \
+            -o release.zip
+          unzip -oq release.zip
+          rm -f release.zip
+
+      - name: Verify Blueprint installer
+        working-directory: panel
+        run: |
+          test -f blueprint.sh
+          chmod +x blueprint.sh
+
+      - name: Install Node dependencies
+        working-directory: panel
+        run: |
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Build production assets
+        working-directory: panel
+        run: |
+          yarn run build:production --progress
+
+      - name: Prepare deployable package
+        working-directory: panel
+        run: |
+          rm -rf node_modules
+          rm -rf .git
+          rm -rf .update
+          rm -rf .blueprint/tmp/*
+          rm -rf storage/logs/*
+          rm -rf storage/framework/cache/*
+          rm -rf storage/framework/sessions/*
+          rm -rf storage/framework/views/*
+          rm -f .env
+          find bootstrap/cache -type f ! -name '.gitignore' -delete || true
+          find . -type f -name '*.map' -delete
+          tar -czf ../pterodactyl-blueprint-build.tar.gz .
+
+      - name: Upload deploy package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pterodactyl-blueprint-build
+          path: pterodactyl-blueprint-build.tar.gz
+          retention-days: 14

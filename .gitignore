@@ -1,0 +1,5 @@
+pterodactyl-blueprint-build.tar.gz
+.env
+.deploy-stage-*
+.deploy-backups/
+panel/
