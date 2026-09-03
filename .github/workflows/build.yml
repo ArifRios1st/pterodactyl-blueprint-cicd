@@ -73,6 +73,8 @@ jobs:
 
       - name: Build production assets
         working-directory: panel
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
         run: |
           yarn run build:production --progress
 

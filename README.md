@@ -103,3 +103,14 @@ Always keep the automatically created `.deploy-backups` until you confirm the pa
 ## Security
 
 Never commit `.env`, database credentials, API keys, or panel secrets to this repository.
+
+
+## OpenSSL legacy compatibility
+
+The workflow explicitly sets:
+
+```text
+NODE_OPTIONS=--openssl-legacy-provider
+```
+
+during the production build because the current panel dependency tree still contains packages that use legacy OpenSSL hashing APIs. This affects the build runner only; it does not require changing your shared-hosting PHP configuration.
