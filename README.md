@@ -1,6 +1,6 @@
 # Pterodactyl + Blueprint CI/CD for Shared Hosting
 
-This repository builds Pterodactyl + Blueprint entirely on GitHub Actions and publishes a ready-to-deploy release. The shared-hosting server only downloads and deploys the completed build.
+This repository builds Pterodactyl + Blueprint entirely on GitHub Actions and publishes a ready-to-deploy release. The shared-hosting server downloads the completed build and performs only the PHP/runtime steps that cannot be completed in CI because they depend on the target panel's `.env` and database.
 
 ## What CI does
 
@@ -8,10 +8,29 @@ This repository builds Pterodactyl + Blueprint entirely on GitHub Actions and pu
 2. Downloads the latest Blueprint release.
 3. Installs production PHP dependencies.
 4. Installs Node dependencies.
-5. Builds frontend assets on GitHub.
+5. Builds production frontend assets on GitHub.
 6. Normalizes Blueprint's runtime directory to `.blueprint/`.
 7. Verifies that `extensionfs.php` is included in the release package.
 8. Publishes `pterodactyl-blueprint-build.tar.gz` as the latest GitHub Release asset.
+
+## What deployment does
+
+v8 intentionally follows the relevant order and behavior of Blueprint's original `blueprint.sh` installer while skipping the Node build on the shared host:
+
+1. Preserves `.env`, `storage/`, uploads, and persistent Blueprint DB-state files.
+2. Downloads and overlays the CI release.
+3. Initializes Blueprint version placeholders and `db/version`.
+4. Creates Blueprint's runtime symlinks:
+   - `.blueprint/extensions/blueprint/public` -> `public/extensions/blueprint`
+   - `.blueprint/extensions/blueprint/assets` -> `public/assets/extensions/blueprint`
+   - `scripts/libraries` -> `.blueprint/lib`
+5. Copies Blueprint's emblem into the Blueprint extension logo when the upstream emblem exists.
+6. Runs Laravel migrations.
+7. Runs `BlueprintSeeder` on the first Blueprint installation.
+8. Rebuilds the same Laravel/Blueprint caches used by the original installer.
+9. Restarts the queue and writes the `is_installed` marker.
+
+The production JavaScript/CSS build remains a GitHub Actions responsibility, avoiding the Node/Terser memory problem on shared hosting.
 
 ## Fresh installation
 
@@ -38,41 +57,51 @@ PHP_BIN=/usr/local/bin/php \
 bash scripts/deploy.sh
 ```
 
-## Existing installation
+## Existing installation / upgrade
 
-The same command supports upgrades. Deployment preserves:
+Use the same command:
+
+```bash
+cd ~/pterodactyl-blueprint-cicd
+git pull
+
+PANEL_DIR=/path/to/panel \
+PHP_BIN=/usr/local/bin/php \
+bash scripts/deploy.sh
+```
+
+Deployment preserves:
 
 - `.env`
 - `storage/`
 - `public/uploads/`
-- Blueprint's persistent database state under `.blueprint/.../private/db/`
+- Blueprint's persistent files under `.blueprint/extensions/blueprint/private/db/`
 
-The new CI release supplies Blueprint runtime files such as:
+The CI release supplies Blueprint runtime files such as:
 
 ```text
 .blueprint/extensions/blueprint/private/extensionfs.php
 ```
 
-## v7 compatibility behavior
+## v8 fixes
 
-v7 fixes the Blueprint directory mismatch found in older artifacts.
+v8 fixes the runtime behavior that v7 still skipped.
 
-- New CI builds package `.blueprint/` correctly.
-- The deploy script also accepts an older artifact containing `blueprint/` and renames it to `.blueprint/` during staging.
-- Fresh installations do not require an existing `extensionfs.php`; it comes from the release package.
-- Deployments stop before migrations if the downloaded CI package itself is missing `extensionfs.php`.
+In particular, the original Blueprint installer creates public symlinks for extension assets. Without this link:
 
-## Updating later
-
-After GitHub Actions publishes a new release:
-
-```bash
-cd ~/pterodactyl-blueprint-cicd
-git pull
-PANEL_DIR=/path/to/panel \
-PHP_BIN=/usr/local/bin/php \
-bash scripts/deploy.sh
+```text
+.blueprint/extensions/blueprint/assets/logo.jpg
 ```
+
+is not reachable through:
+
+```text
+/assets/extensions/blueprint/logo.jpg
+```
+
+v8 creates that symlink during deployment, so Blueprint logos and other extension assets are served from their expected public URL.
+
+v8 also performs the original installer's version-placeholder, initial-seeding, Blueprint cache, and queue-finalization steps instead of only touching `is_installed`.
 
 ## Security
 
