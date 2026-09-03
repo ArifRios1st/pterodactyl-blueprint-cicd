@@ -85,14 +85,24 @@ if [ "$TOP_COUNT" = "1" ] && [ -d "$(find "$RELEASE_DIR" -mindepth 1 -maxdepth 1
 fi
 [ -f "$RELEASE_DIR/artisan" ] || { echo "ERROR: Invalid release package (artisan missing)."; exit 1; }
 
-echo "[4/9] Preserving environment and persistent storage..."
+echo "[4/9] Preserving environment, persistent storage, and Blueprint runtime state..."
 cp -a "$PANEL_DIR/.env" "$STAGE/.env"
 if [ -d "$PANEL_DIR/storage" ]; then cp -a "$PANEL_DIR/storage" "$STAGE/storage"; fi
 if [ -d "$PANEL_DIR/public/uploads" ]; then mkdir -p "$STAGE/public"; cp -a "$PANEL_DIR/public/uploads" "$STAGE/public/uploads"; fi
 
-# Never deploy these from CI.
+# Blueprint generates runtime configuration under .blueprint/.../private.
+# This file is host/panel specific and MUST survive CI artifact overlays.
+BLUEPRINT_PRIVATE="$PANEL_DIR/.blueprint/extensions/blueprint/private"
+if [ -d "$BLUEPRINT_PRIVATE" ]; then
+  mkdir -p "$STAGE/blueprint-private"
+  cp -a "$BLUEPRINT_PRIVATE/." "$STAGE/blueprint-private/"
+fi
+
+# Never deploy environment, Laravel runtime storage, uploads, or Blueprint's
+# generated private runtime state from CI.
 rm -f "$RELEASE_DIR/.env"
 rm -rf "$RELEASE_DIR/storage" "$RELEASE_DIR/public/uploads"
+rm -rf "$RELEASE_DIR/.blueprint/extensions/blueprint/private"
 
 echo "[5/9] Overlaying release files..."
 # Use tar instead of rsync for shared-hosting compatibility. This safely
@@ -101,10 +111,26 @@ tar -C "$RELEASE_DIR" \
   --exclude='./.env' \
   --exclude='./storage' \
   --exclude='./public/uploads' \
+  --exclude='./.blueprint/extensions/blueprint/private' \
   -cf - . | tar -C "$PANEL_DIR" -xf -
 cp -a "$STAGE/.env" "$PANEL_DIR/.env"
 [ -d "$STAGE/storage" ] && { rm -rf "$PANEL_DIR/storage"; cp -a "$STAGE/storage" "$PANEL_DIR/storage"; }
 [ -d "$STAGE/public/uploads" ] && { mkdir -p "$PANEL_DIR/public"; rm -rf "$PANEL_DIR/public/uploads"; cp -a "$STAGE/public/uploads" "$PANEL_DIR/public/uploads"; }
+
+# Restore Blueprint generated runtime state after overlay. This specifically
+# protects extensionfs.php, which is required by ExtensionfsConfigProvider.
+if [ -d "$STAGE/blueprint-private" ]; then
+  mkdir -p "$PANEL_DIR/.blueprint/extensions/blueprint/private"
+  cp -a "$STAGE/blueprint-private/." "$PANEL_DIR/.blueprint/extensions/blueprint/private/"
+fi
+
+EXTENSIONFS="$PANEL_DIR/.blueprint/extensions/blueprint/private/extensionfs.php"
+if [ ! -f "$EXTENSIONFS" ]; then
+  echo "ERROR: Blueprint runtime file is missing: $EXTENSIONFS"
+  echo "Refusing to run Laravel migrations because ExtensionfsConfigProvider requires it."
+  echo "Restore this file from a known-good panel backup, then rerun deployment."
+  exit 1
+fi
 
 echo "[6/9] Preparing Laravel permissions..."
 mkdir -p "$PANEL_DIR/storage/framework/cache" "$PANEL_DIR/storage/framework/sessions" "$PANEL_DIR/storage/framework/views" "$PANEL_DIR/storage/logs" "$PANEL_DIR/bootstrap/cache"

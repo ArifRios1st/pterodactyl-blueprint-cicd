@@ -106,3 +106,7 @@ Do not commit the following to GitHub:
 - `.env` files
 - database credentials
 - API tokens or deployment secrets
+
+## v6 deployment safeguard
+
+Version 6 preserves Blueprint's generated runtime directory (`.blueprint/extensions/blueprint/private`) during deployment. In particular, `extensionfs.php` is restored before any Laravel Artisan command runs, preventing `ExtensionfsConfigProvider` from failing after a CI artifact overlay.
