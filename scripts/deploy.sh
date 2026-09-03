@@ -70,7 +70,10 @@ rollback() {
 }
 trap rollback ERR
 
-# Blueprint's original installer seeds only during the first installation.
+# Filesystem state and database state are intentionally treated separately.
+# A deployment may target a new PANEL_DIR while .env points at an already-existing
+# Pterodactyl/Blueprint database. Therefore a missing filesystem marker alone
+# must not be interpreted as a fresh database installation.
 WAS_BLUEPRINT_INSTALLED=0
 if [ -f "$PANEL_DIR/.blueprint/extensions/blueprint/private/db/is_installed" ]; then
   WAS_BLUEPRINT_INSTALLED=1
@@ -241,6 +244,12 @@ link_runtime_path \
 # Replace `php artisan storage:link` because PHP exec() is disabled on this
 # shared hosting. The resulting link is equivalent:
 # storage/app/public -> public/storage
+#
+# A release artifact intentionally does not contain persistent Laravel storage.
+# On a new PANEL_DIR there may therefore be no storage/app/public yet. Create
+# the source directory before creating the symlink, matching Laravel's expected
+# runtime layout.
+mkdir -p "$PANEL_DIR/storage/app/public"
 link_runtime_path \
   "$PANEL_DIR/storage/app/public" \
   "$PANEL_DIR/public/storage"
@@ -265,11 +274,23 @@ chmod -R u+rwX storage bootstrap/cache || true
 echo "[10/13] Running database migrations..."
 "$PHP_BIN" artisan migrate --force
 
-if [ "$WAS_BLUEPRINT_INSTALLED" = 0 ]; then
-  echo "[11/13] Seeding Blueprint database records (fresh Blueprint install)..."
-  "$PHP_BIN" artisan db:seed --class=BlueprintSeeder --force
+# Do not infer a fresh database from a missing filesystem marker. This is
+# important when PANEL_DIR is new but .env points to an existing database.
+# Ask the database whether the Pterodactyl migration repository already contains
+# applied migrations. A database with existing migrations is treated as an
+# existing installation and BlueprintSeeder is not re-run automatically.
+DATABASE_HAS_MIGRATIONS=0
+if "$PHP_BIN" artisan tinker --execute="echo \Illuminate\Support\Facades\Schema::hasTable('migrations') && \Illuminate\Support\Facades\DB::table('migrations')->count() > 0 ? '1' : '0';" 2>/dev/null | grep -qx '1'; then
+  DATABASE_HAS_MIGRATIONS=1
+fi
+
+if [ "$WAS_BLUEPRINT_INSTALLED" = 1 ]; then
+  echo "[11/13] Blueprint filesystem marker already exists; skipping initial Blueprint seeder..."
+elif [ "$DATABASE_HAS_MIGRATIONS" = 1 ]; then
+  echo "[11/13] Existing database detected; skipping initial Blueprint seeder and restoring installation state..."
 else
-  echo "[11/13] Blueprint was already installed; skipping initial Blueprint seeder..."
+  echo "[11/13] Empty database detected; seeding Blueprint database records..."
+  "$PHP_BIN" artisan db:seed --class=BlueprintSeeder --force
 fi
 
 echo "[12/13] Rebuilding Laravel/Blueprint caches and restarting queue..."
