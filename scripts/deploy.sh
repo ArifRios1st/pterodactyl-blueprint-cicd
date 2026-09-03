@@ -204,7 +204,13 @@ echo "[12/12] Rebuilding Laravel/Blueprint caches and restarting queue..."
 "$PHP_BIN" artisan route:clear
 "$PHP_BIN" artisan cache:clear
 "$PHP_BIN" artisan bp:cache
-"$PHP_BIN" artisan bp:version:cache
+# The upstream Blueprint command returns a non-zero exit status when the
+# latest-version API is temporarily unavailable. The original blueprint.sh
+# does not run with `set -e`, so that transient network failure must not abort
+# an otherwise successful deployment.
+if ! "$PHP_BIN" artisan bp:version:cache; then
+  echo "WARNING: Blueprint latest-version cache could not be refreshed. Continuing deployment."
+fi
 "$PHP_BIN" artisan queue:restart || true
 
 echo "[13/13] Finalizing Blueprint installation state..."
