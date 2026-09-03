@@ -75,13 +75,27 @@ jobs:
       - name: Prepare deployable package
         working-directory: panel
         run: |
+          # Blueprint's upstream release may unpack into blueprint/. The panel
+          # runtime expects .blueprint/. Normalize before creating the artifact.
+          if [ -d blueprint ] && [ ! -d .blueprint ]; then
+            mv blueprint .blueprint
+          fi
+          test -f .blueprint/extensions/blueprint/private/extensionfs.php
+
           rm -rf node_modules .git .update
           rm -rf .blueprint/tmp/*
           rm -rf storage/logs/* storage/framework/cache/* storage/framework/sessions/* storage/framework/views/*
           rm -f .env
           find bootstrap/cache -type f ! -name '.gitignore' -delete || true
           find . -type f -name '*.map' -delete
+
+          # Explicitly archive .blueprint with its leading dot preserved.
           tar -czf ../pterodactyl-blueprint-build.tar.gz .
+
+      - name: Verify deploy package
+        run: |
+          tar -tzf pterodactyl-blueprint-build.tar.gz | grep -qx './.blueprint/extensions/blueprint/private/extensionfs.php'
+          ! tar -tzf pterodactyl-blueprint-build.tar.gz | grep -q '^./blueprint/extensions/blueprint/private/extensionfs.php$'
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
