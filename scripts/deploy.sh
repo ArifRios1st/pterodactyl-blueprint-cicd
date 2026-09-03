@@ -100,7 +100,11 @@ fi
   exit 1
 }
 
-echo "[5/12] Preserving environment and persistent panel state..."
+echo "[5/12] Entering maintenance mode before filesystem changes..."
+cd "$PANEL_DIR"
+"$PHP_BIN" artisan down || true
+
+echo "[6/12] Preserving environment and persistent panel state..."
 cp -a "$PANEL_DIR/.env" "$STAGE/.env"
 [ -d "$PANEL_DIR/storage" ] && cp -a "$PANEL_DIR/storage" "$STAGE/storage" || true
 [ -d "$PANEL_DIR/public/uploads" ] && { mkdir -p "$STAGE/public"; cp -a "$PANEL_DIR/public/uploads" "$STAGE/public/uploads"; } || true
@@ -113,7 +117,7 @@ fi
 rm -f "$RELEASE_DIR/.env"
 rm -rf "$RELEASE_DIR/storage" "$RELEASE_DIR/public/uploads"
 
-echo "[6/12] Overlaying release files..."
+echo "[7/12] Overlaying release files..."
 tar -C "$RELEASE_DIR" -cf - . | tar -C "$PANEL_DIR" -xf -
 cp -a "$STAGE/.env" "$PANEL_DIR/.env"
 if [ -d "$STAGE/storage" ]; then rm -rf "$PANEL_DIR/storage"; cp -a "$STAGE/storage" "$PANEL_DIR/storage"; fi
@@ -128,7 +132,7 @@ EXTENSIONFS="$PANEL_DIR/.blueprint/extensions/blueprint/private/extensionfs.php"
 
 cd "$PANEL_DIR"
 
-echo "[7/12] Reproducing Blueprint runtime initialization..."
+echo "[8/12] Reproducing Blueprint runtime initialization..."
 # Blueprint blueprint.sh replaces ::v placeholders and creates db/version before
 # installation. Always patch an unexpanded placeholder so upgrades cannot leave
 # the new PlaceholderService reporting 'unknown' after its old db/version marker
@@ -173,25 +177,27 @@ if [ -f "$EMBLEM" ]; then
   cp -f "$EMBLEM" "$BP_LOGO"
 fi
 
-# Same Laravel storage symlink requested by blueprint.sh.
-"$PHP_BIN" artisan storage:link || true
+# Replacement for `php artisan storage:link`.
+# Shared hosting may disable PHP exec(), which causes Laravel\'s Filesystem::link()
+# to fail. Create the exact public/storage symlink directly from the shell.
+mkdir -p "$PANEL_DIR/storage/app/public"
+link_runtime_path "$PANEL_DIR/storage/app/public" "$PANEL_DIR/public/storage"
 
-echo "[8/12] Preparing Laravel permissions..."
+echo "[9/12] Preparing Laravel permissions..."
 mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
 chmod -R u+rwX storage bootstrap/cache || true
 
-echo "[9/12] Running database migrations..."
-"$PHP_BIN" artisan down || true
+echo "[10/12] Running database migrations..."
 "$PHP_BIN" artisan migrate --force
 
 if [ "$WAS_BLUEPRINT_INSTALLED" = 0 ]; then
-  echo "[10/12] Seeding Blueprint database records (fresh Blueprint install)..."
+  echo "[11/12] Seeding Blueprint database records (fresh Blueprint install)..."
   "$PHP_BIN" artisan db:seed --class=BlueprintSeeder --force
 else
-  echo "[10/12] Blueprint was already installed; skipping initial Blueprint seeder..."
+  echo "[11/12] Blueprint was already installed; skipping initial Blueprint seeder..."
 fi
 
-echo "[11/12] Rebuilding Laravel/Blueprint caches and restarting queue..."
+echo "[12/12] Rebuilding Laravel/Blueprint caches and restarting queue..."
 # Keep the order from Blueprint's original installer.
 "$PHP_BIN" artisan view:cache
 "$PHP_BIN" artisan config:cache
@@ -201,7 +207,7 @@ echo "[11/12] Rebuilding Laravel/Blueprint caches and restarting queue..."
 "$PHP_BIN" artisan bp:version:cache
 "$PHP_BIN" artisan queue:restart || true
 
-echo "[12/12] Finalizing Blueprint installation state..."
+echo "[13/13] Finalizing Blueprint installation state..."
 MARKER="$PANEL_DIR/.blueprint/extensions/blueprint/private/db/is_installed"
 mkdir -p "$(dirname "$MARKER")"
 touch "$MARKER"
