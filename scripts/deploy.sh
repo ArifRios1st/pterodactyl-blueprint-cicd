@@ -157,8 +157,14 @@ fi
 
 # Save the release registry: the CI-installed extensions are listed here,
 # and the old-db restore in step 7 would otherwise wipe the new entries.
-cp -a "$RELEASE_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions" \
-  "$STAGE/installed_extensions.release" 2>/dev/null || true
+# Loud failure: a silent skip here once left the panel registry empty and
+# the admin page showing only Blueprint.
+if [ -f "$RELEASE_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions" ]; then
+  cp -a "$RELEASE_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions" \
+    "$STAGE/installed_extensions.release"
+else
+  echo "WARNING: Release has no installed_extensions registry; extension list will not be updated."
+fi
 
 rm -f "$RELEASE_DIR/.env"
 rm -rf "$RELEASE_DIR/storage" "$RELEASE_DIR/public/uploads"
@@ -206,6 +212,15 @@ if [ -f "$STAGE/installed_extensions.release" ]; then
     :
   done < <(grep -o '|[^,]*,' "$REG" || true)
   mv "$REG.tmp" "$REG"
+fi
+
+# The framework itself is always installed; make sure it stays listed even
+# when neither the old nor the release registry contained it (CI never runs
+# the installer for "blueprint" itself, so the release registry may lack it).
+REG="$PANEL_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions"
+if [ -f "$REG" ]; then
+  grep -qF '|blueprint,' "$REG" || printf '%s' '|blueprint,' >> "$REG"
+  echo "Installed extensions registry: $(cat "$REG")"
 fi
 
 EXTENSIONFS="$PANEL_DIR/.blueprint/extensions/blueprint/private/extensionfs.php"
