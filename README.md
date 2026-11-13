@@ -8,10 +8,19 @@ This repository builds Pterodactyl + Blueprint entirely on GitHub Actions and pu
 2. Downloads the latest Blueprint release.
 3. Installs production PHP dependencies.
 4. Installs Node dependencies.
-5. Builds production frontend assets on GitHub.
-6. Normalizes Blueprint's runtime directory to `.blueprint/`.
-7. Verifies that `extensionfs.php` is included in the release package.
-8. Publishes `pterodactyl-blueprint-build.tar.gz` as the latest GitHub Release asset.
+5. Installs every Blueprint extension from `extensions/` with Blueprint's own installer, before the frontend build.
+6. Builds production frontend assets on GitHub.
+7. Normalizes Blueprint's runtime directory to `.blueprint/`.
+8. Verifies that `extensionfs.php` and every installed extension are included in the release package.
+9. Publishes `pterodactyl-blueprint-build.tar.gz` as the latest GitHub Release asset.
+
+Pushing a change under `extensions/` (or to the workflow file) triggers a build automatically.
+
+## Extensions
+
+See [`extensions/README.md`](extensions/README.md). The build currently ships Minecraft Player Manager, Modrinth Browser, MOTD Maker, Snowflakes, and Minecraft Version Changer. Nebula is intentionally excluded: it is paid software whose EULA forbids redistribution, so it is never committed to this public repository.
+
+Do not install extensions manually on the server. The next deploy overlays the panel with the CI build and removes anything that did not come from CI.
 
 ## What deployment does
 
