@@ -141,37 +141,6 @@ jobs:
           printf '%s\n' $installed > "$GITHUB_WORKSPACE/installed_extensions.txt"
           echo "Installed extensions:$installed"
 
-      - name: Generate Blueprint extension metadata
-        working-directory: panel
-        run: |
-          # Neither the framework release nor the extension installer creates
-          # .store/conf.yml for the "blueprint" extension itself, so a
-          # CI-deployed panel has no Blueprint listing card — and a registry
-          # token without this file 500s the whole panel (extensionsConfigs()
-          # calls array_filter(null) at route boot). Generate the minimal
-          # metadata the listing card, route registration and telemetry read
-          # (info.identifier/name/version/author), with the version taken
-          # from the installed framework, and register the token so the
-          # package verification below covers its metadata too.
-          BP_VERSION="$(sed -nE 's/^VERSION="([^"]*)".*/\1/p' blueprint.sh | head -n1)"
-          mkdir -p .blueprint/extensions/blueprint/private/.store
-          printf '%s\n' \
-            'info:' \
-            '  identifier: blueprint' \
-            '  name: Blueprint' \
-            "  version: $BP_VERSION" \
-            '  author: system' \
-            "  description: Pterodactyl's favorite modding community." \
-            > .blueprint/extensions/blueprint/private/.store/conf.yml
-          # The listing card falls back to icon.jpg; the release only ships
-          # logo.jpg (same emblem image).
-          [ -f .blueprint/extensions/blueprint/assets/logo.jpg ] && cp \
-            .blueprint/extensions/blueprint/assets/logo.jpg \
-            .blueprint/extensions/blueprint/assets/icon.jpg || true
-          REG='.blueprint/extensions/blueprint/private/db/installed_extensions'
-          grep -qF '|blueprint,' "$REG" || printf '%s' '|blueprint,' >> "$REG"
-          printf '%s\n' blueprint >> "$GITHUB_WORKSPACE/installed_extensions.txt"
-
       - name: Build production assets
         working-directory: panel
         env:
