@@ -195,23 +195,41 @@ fi
 # entries whose extension files no longer exist (e.g. installed manually on
 # the server and wiped by the overlay). The panel reads this registry at
 # runtime, so a stale entry would break the extensions admin page.
+#
+# NO process substitution (< <(...)) anywhere here: /dev/fd is unavailable
+# on restricted shared hosting, where both loops below silently read zero
+# tokens — and the prune's mv then truncates the registry to empty, wiping
+# every extension from the admin page (this happened on 2026-11-14, twice).
+# Tokens go through plain temp files instead.
 if [ -f "$STAGE/installed_extensions.release" ]; then
   REG="$PANEL_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions"
   touch "$REG"
+  grep -o '|[^,]*,' "$STAGE/installed_extensions.release" > "$STAGE/release.tokens" || true
+  if [ -s "$STAGE/installed_extensions.release" ] && [ ! -s "$STAGE/release.tokens" ]; then
+    echo "WARNING: Could not parse release extension tokens; release extensions will not be added to the registry."
+  fi
   while IFS= read -r token; do
     [ -n "$token" ] || continue
     grep -qF "$token" "$REG" || printf '%s' "$token" >> "$REG"
-  done < <(grep -o '|[^,]*,' "$STAGE/installed_extensions.release" || true)
-  : > "$REG.tmp"
-  while IFS= read -r token; do
-    [ -n "$token" ] || continue
-    extid="${token#|}"; extid="${extid%,}"
-    if [ -d "$PANEL_DIR/.blueprint/extensions/$extid" ]; then
-      printf '%s' "$token" >> "$REG.tmp"
-    fi
-    :
-  done < <(grep -o '|[^,]*,' "$REG" || true)
-  mv "$REG.tmp" "$REG"
+  done < "$STAGE/release.tokens"
+  grep -o '|[^,]*,' "$REG" > "$STAGE/merged.tokens" || true
+  if [ -s "$REG" ] && [ ! -s "$STAGE/merged.tokens" ]; then
+    # A non-empty registry must yield at least one token; zero tokens means
+    # the extraction itself failed. Never let the prune run on that input:
+    # it would replace a good registry with an empty file.
+    echo "ERROR: Could not parse merged extension tokens; leaving registry unchanged."
+  else
+    : > "$REG.tmp"
+    while IFS= read -r token; do
+      [ -n "$token" ] || continue
+      extid="${token#|}"; extid="${extid%,}"
+      if [ -d "$PANEL_DIR/.blueprint/extensions/$extid" ]; then
+        printf '%s' "$token" >> "$REG.tmp"
+      fi
+      :
+    done < "$STAGE/merged.tokens"
+    mv "$REG.tmp" "$REG"
+  fi
 fi
 
 # "blueprint" must never be in the registry: its card on /admin/extensions
