@@ -111,12 +111,18 @@ jobs:
 
           # stdin is /dev/null so interactive install hooks (Nebula asks the
           # user to press RETURN twice) continue instead of hanging.
-          sudo bash blueprint.sh -bash -install $names < /dev/null
+          # IgnoreRebuild must be set on the sudo command line: sudo strips
+          # it from the environment, and without it the installer runs its
+          # own yarn build as root, leaving root-owned files under
+          # node_modules/.cache that later steps cannot remove.
+          sudo IgnoreRebuild=true bash blueprint.sh -bash -install $names < /dev/null
 
           # The installer's finalize step chowns the panel to www-data.
           # Restore runner ownership (node_modules is excluded: it is big
-          # and the installer never touches it).
+          # and, with IgnoreRebuild in effect, the installer never writes
+          # there; the .cache line below is only a safety net).
           sudo find . -path ./node_modules -prune -o -exec chown "$(id -u):$(id -g)" {} +
+          [ -d node_modules/.cache ] && sudo chown -R "$(id -u):$(id -g)" node_modules/.cache || true
 
           # The installer exits 0 when at least one extension succeeds, so a
           # single failed extension would otherwise go unnoticed.
@@ -151,7 +157,9 @@ jobs:
           fi
           test -f .blueprint/extensions/blueprint/private/extensionfs.php
 
-          rm -rf node_modules .git .update
+          # node_modules may contain root-owned files (the extension installer
+          # runs under sudo), so remove it with sudo as well.
+          sudo rm -rf node_modules .git .update
           rm -rf .blueprint/tmp/*
           rm -rf storage/logs/* storage/framework/cache/* storage/framework/sessions/* storage/framework/views/*
           rm -f .env
