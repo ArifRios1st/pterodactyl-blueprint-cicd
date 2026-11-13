@@ -9,6 +9,12 @@ on:
         default: "latest"
   schedule:
     - cron: "0 3 * * 1"
+  push:
+    branches:
+      - main
+    paths:
+      - "extensions/**"
+      - ".github/workflows/build.yml"
 
 permissions:
   contents: write
@@ -18,6 +24,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Prepare tools
         run: sudo apt-get update && sudo apt-get install -y unzip zip rsync
 
@@ -66,6 +75,66 @@ jobs:
         working-directory: panel
         run: yarn install --frozen-lockfile || yarn install
 
+      - name: Install Blueprint extensions
+        working-directory: panel
+        env:
+          IgnoreRebuild: "true"
+          NEBULA_BLUEPRINT_URL: ${{ secrets.NEBULA_BLUEPRINT_URL }}
+        run: |
+          # Blueprint's installer places a `blueprint` shortcut in /usr/local/bin
+          # and runs extension install hooks via `su $WEBUSER`. Neither works
+          # as the runner user, so neutralize the shortcut and point the hook
+          # user at the runner account. The installer itself runs under sudo
+          # so `su` succeeds; ownership is restored afterwards.
+          printf 'SHORTCUT_DIR=""\nWEBUSER="runner"\n' > .blueprintrc
+
+          cp "$GITHUB_WORKSPACE/extensions/"*.blueprint . 2>/dev/null || true
+
+          # Nebula is paid software whose EULA forbids redistribution, so it
+          # is never committed to this repository. If a private download URL
+          # is configured, fetch it for this build only.
+          if [ -n "${NEBULA_BLUEPRINT_URL:-}" ]; then
+            curl -fL --retry 3 "$NEBULA_BLUEPRINT_URL" -o nebula.blueprint
+          fi
+
+          names=""
+          for f in *.blueprint; do
+            [ -f "$f" ] || continue
+            names="$names ${f%.blueprint}"
+          done
+
+          if [ -z "$names" ]; then
+            echo "No .blueprint files found, skipping extension install."
+            : > "$GITHUB_WORKSPACE/installed_extensions.txt"
+            exit 0
+          fi
+
+          # stdin is /dev/null so interactive install hooks (Nebula asks the
+          # user to press RETURN twice) continue instead of hanging.
+          sudo bash blueprint.sh -bash -install $names < /dev/null
+
+          # The installer's finalize step chowns the panel to www-data.
+          # Restore runner ownership (node_modules is excluded: it is big
+          # and the installer never touches it).
+          sudo find . -path ./node_modules -prune -o -exec chown "$(id -u):$(id -g)" {} +
+
+          # The installer exits 0 when at least one extension succeeds, so a
+          # single failed extension would otherwise go unnoticed.
+          installed="$(grep -o '|[^,]*,' .blueprint/extensions/blueprint/private/db/installed_extensions 2>/dev/null | tr -d '|,' | tr '\n' ' ' || true)"
+          missing=""
+          for id in $names; do
+            case " $installed " in
+              *" $id "*) ;;
+              *) missing="$missing $id" ;;
+            esac
+          done
+          if [ -n "$missing" ]; then
+            echo "ERROR: extensions failed to install:$missing"
+            exit 1
+          fi
+          printf '%s\n' $installed > "$GITHUB_WORKSPACE/installed_extensions.txt"
+          echo "Installed extensions:$installed"
+
       - name: Build production assets
         working-directory: panel
         env:
@@ -86,6 +155,7 @@ jobs:
           rm -rf .blueprint/tmp/*
           rm -rf storage/logs/* storage/framework/cache/* storage/framework/sessions/* storage/framework/views/*
           rm -f .env
+          rm -f *.blueprint .blueprintrc
           find bootstrap/cache -type f ! -name '.gitignore' -delete || true
           find . -type f -name '*.map' -delete
 
@@ -94,8 +164,16 @@ jobs:
 
       - name: Verify deploy package
         run: |
-          tar -tzf pterodactyl-blueprint-build.tar.gz | grep -qx './.blueprint/extensions/blueprint/private/extensionfs.php'
-          ! tar -tzf pterodactyl-blueprint-build.tar.gz | grep -q '^./blueprint/extensions/blueprint/private/extensionfs.php$'
+          tar -tzf pterodactyl-blueprint-build.tar.gz > package_contents.txt
+          grep -qx './.blueprint/extensions/blueprint/private/extensionfs.php' package_contents.txt
+          ! grep -q '^./blueprint/extensions/blueprint/private/extensionfs.php$' package_contents.txt
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            if ! grep -qx "./.blueprint/extensions/$id/private/.store/conf.yml" package_contents.txt; then
+              echo "ERROR: extension '$id' is missing from the deploy package."
+              exit 1
+            fi
+          done < installed_extensions.txt
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
