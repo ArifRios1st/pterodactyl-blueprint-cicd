@@ -155,6 +155,11 @@ if [ -d "$OLD_BP_DB" ]; then
   cp -a "$OLD_BP_DB/." "$STAGE/blueprint-db/"
 fi
 
+# Save the release registry: the CI-installed extensions are listed here,
+# and the old-db restore in step 7 would otherwise wipe the new entries.
+cp -a "$RELEASE_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions" \
+  "$STAGE/installed_extensions.release" 2>/dev/null || true
+
 rm -f "$RELEASE_DIR/.env"
 rm -rf "$RELEASE_DIR/storage" "$RELEASE_DIR/public/uploads"
 
@@ -178,6 +183,29 @@ if [ -d "$STAGE/blueprint-db" ]; then
   mkdir -p "$PANEL_DIR/.blueprint/extensions/blueprint/private/db"
   cp -a "$STAGE/blueprint-db/." \
     "$PANEL_DIR/.blueprint/extensions/blueprint/private/db/"
+fi
+
+# Merge the release extension registry into the preserved one, then drop
+# entries whose extension files no longer exist (e.g. installed manually on
+# the server and wiped by the overlay). The panel reads this registry at
+# runtime, so a stale entry would break the extensions admin page.
+if [ -f "$STAGE/installed_extensions.release" ]; then
+  REG="$PANEL_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions"
+  touch "$REG"
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    grep -qF "$token" "$REG" || printf '%s' "$token" >> "$REG"
+  done < <(grep -o '|[^,]*,' "$STAGE/installed_extensions.release" || true)
+  : > "$REG.tmp"
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    extid="${token#|}"; extid="${extid%,}"
+    if [ -d "$PANEL_DIR/.blueprint/extensions/$extid" ]; then
+      printf '%s' "$token" >> "$REG.tmp"
+    fi
+    :
+  done < <(grep -o '|[^,]*,' "$REG" || true)
+  mv "$REG.tmp" "$REG"
 fi
 
 EXTENSIONFS="$PANEL_DIR/.blueprint/extensions/blueprint/private/extensionfs.php"
