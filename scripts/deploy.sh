@@ -214,12 +214,21 @@ if [ -f "$STAGE/installed_extensions.release" ]; then
   mv "$REG.tmp" "$REG"
 fi
 
-# The framework itself is always installed; make sure it stays listed even
-# when neither the old nor the release registry contained it (CI never runs
-# the installer for "blueprint" itself, so the release registry may lack it).
+# The framework itself is always installed, but its registry token is only
+# safe when its conf.yml exists: a token without conf.yml 500s the whole
+# panel (extensionsConfigs() calls array_filter(null) at route boot).
+# Neither the framework release nor the CI tarball ships
+# blueprint/private/.store/conf.yml, so on CI-deployed panels the token
+# must stay OUT until that file exists (e.g. copied from a panel that was
+# installed with the real installer).
 REG="$PANEL_DIR/.blueprint/extensions/blueprint/private/db/installed_extensions"
+BP_CONF="$PANEL_DIR/.blueprint/extensions/blueprint/private/.store/conf.yml"
 if [ -f "$REG" ]; then
-  grep -qF '|blueprint,' "$REG" || printf '%s' '|blueprint,' >> "$REG"
+  if [ -f "$BP_CONF" ]; then
+    grep -qF '|blueprint,' "$REG" || printf '%s' '|blueprint,' >> "$REG"
+  else
+    sed -i 's/|blueprint,//g' "$REG"
+  fi
   echo "Installed extensions registry: $(cat "$REG")"
 fi
 
