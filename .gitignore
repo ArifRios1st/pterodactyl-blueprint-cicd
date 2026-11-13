@@ -3,3 +3,5 @@ pterodactyl-blueprint-build.tar.gz
 .deploy-stage-*
 .deploy-backups/
 panel/
+# Nebula is paid software (EULA forbids redistribution). Never commit it.
+extensions/nebula.blueprint
